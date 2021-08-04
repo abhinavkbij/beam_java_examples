@@ -32,12 +32,16 @@ public class TopPackages {
     private static final String outputFile = "topcounts";
     private static final String searchTerm = "import";
 
+    // DoFn for extracting package names from each import statement
     static class extractPackagesFn extends DoFn<String,String> {
         @ProcessElement
         public void processElement(@Element String element, OutputReceiver<String> receiver) {
+            // initialize an arraylist to store package names
             List<String> listOfPackages = new ArrayList<String>();
+            //split the import statement and take only the name of package
             String[] arrOfLines = element.split(" ",2);
             element = arrOfLines[arrOfLines.length-1];
+            //below loop splits the package name with 'period' in each iteration and builds the name of package by appending with existing elements in the list i.e. org.apache.beam.sdk becomes org, apache.beam.sdk and org goes to listOfPackages, then apache, beam.sdk and now listOfPackages becomes [org,org.apache] and so on.
             while (element.contains(".")) {
                 String[] tmp = element.split("\\.",2);
                 if (!(listOfPackages.size()==0)) {
@@ -47,9 +51,12 @@ public class TopPackages {
                 }
                 element = tmp[tmp.length-1];
             }
+            // convert to object
             Object[] objects = listOfPackages.toArray();
+            //convert to string array
             String[] arrOfPackages = Arrays.copyOf(objects, objects.length, String[].class);
             // return arrOfPackages;
+            // output each package name from listOfPackages
             for (String pkg : arrOfPackages) {
                 if (!pkg.isEmpty()) {
                     receiver.output(pkg);
@@ -58,16 +65,18 @@ public class TopPackages {
         }
     }
 
-    public static class CountWords extends PTransform<PCollection<String>,PCollection<KV<String,Long>>> {
+    // first extract the import statements, then extract package names, then count the packages
+    public static class CountPackages extends PTransform<PCollection<String>,PCollection<KV<String,Long>>> {
         @Override
         public PCollection<KV<String,Long>> expand(PCollection<String> lines) {
             PCollection<String> outputlines = lines.apply(ParDo.of(new grepLogicFn()));
-            PCollection<String> words = outputlines.apply(ParDo.of(new extractPackagesFn()));
-            PCollection<KV<String,Long>> wordCounts = words.apply(Count.perElement());
-            return wordCounts;
+            PCollection<String> pkgs = outputlines.apply(ParDo.of(new extractPackagesFn()));
+            PCollection<KV<String,Long>> packageCounts = pkgs.apply(Count.perElement());
+            return packageCounts;
         }
     }
 
+    // format as "k, v" pairs to write into file
     static class TopFormatAsTextFn extends DoFn<List<KV<String, Long>>,String> {
         @ProcessElement
         public void processElement(@Element List<KV<String, Long>> element, OutputReceiver<String> receiver) {
@@ -79,6 +88,7 @@ public class TopPackages {
         }
     }
 
+    //DoFn for grep
     static class grepLogicFn extends DoFn<String, String> {
         @ProcessElement
         public void processElement(@Element String element, OutputReceiver<String> receiver) {
@@ -87,21 +97,23 @@ public class TopPackages {
             }
         }
     }
-    
+
+    // build the pipeline
     public static void runTopPackages(PipelineOptions options) {
         Pipeline p = Pipeline.create(options);
         p.apply("Read lines", TextIO.read().from(inputFile))
-            // .apply("Grep", new applyGrep())
-            // .apply("Split", )
-            .apply("Count'em", new CountWords())
-            .apply("Extract top 2", Top.of(5,new KV.OrderByValue<>()))
-            .apply(ParDo.of(new TopFormatAsTextFn()))
-            .apply("output", TextIO.write().to(outputFile).withSuffix(".txt").withoutSharding());
+            .apply("Count'em", new CountPackages())
+            .apply("Take top 5", Top.of(5,new KV.OrderByValue<>()))
+            .apply("Format as k,v", ParDo.of(new TopFormatAsTextFn()))
+            .apply("Write into file", TextIO.write().to(outputFile).withSuffix(".txt").withoutSharding());
         p.run().waitUntilFinish();
     }
 
+    //
     public static void main(String[] args) {
+        //
         PipelineOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().create();
+        // execute the pipeline
         runTopPackages(options);
     }
 }
