@@ -1,5 +1,5 @@
 // importing packages
-package org.apache.beam.examplesss;
+package org.apache.beam.examples;
 import org.apache.beam.examples.common.ExampleUtils;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.TextIO;
